@@ -1,0 +1,7 @@
+description = "Simple HTTP client and server for async"
+version = "%%VERSION_NUM%%"
+requires = ""
+archive(byte) = "async_http.cma"
+archive(native) = "async_http.cmxa"
+plugin(byte) = "async_http.cma"
+plugin(native) = "async_http.cmxs"
