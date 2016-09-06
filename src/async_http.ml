@@ -99,15 +99,38 @@ module Protocol = struct
   let response_body len =
     take len
 
+  let chunk_extension =
+    char ';' *> lift2 (fun ext_name ext_val -> (ext_name, ext_val))
+      (take_while P.is_token)
+      (* FIXME or quoted-string *)
+      (option None (char '=' *> take_while P.is_token >>| Option.some))
+
+  let chunk =
+    take_while1 P.is_hex >>= (fun len ->
+        let len' = (int_of_string ("0x" ^ len)) in
+        let header = (skip_many chunk_extension) *> eol in
+        if len' > 0 then header *> take (int_of_string ("0x" ^ len)) <* eol
+        else header *> return "")
+
+  let trailer =
+    skip_many (header <* eol)
+
+  let response_chunked =
+    many chunk <* trailer <* eol >>| String.concat
+
   let response (type r) (typ : r Response.body) =
     response_header >>= fun (version, status, msg, headers) ->
     let make_resp_body (body : string) : r = match typ with
     | Response.String -> body
     | Response.Parsed v -> v body in
-    match List.Assoc.find headers "Content-Length" with
-    | Some len -> lift (fun body -> {Response.status; version; headers; body = make_resp_body body})
-                    (response_body (int_of_string len))
-    | None -> return {Response.status; version; headers; body = make_resp_body ""}
+    let content_len = List.Assoc.find headers "Content-Length" in
+    let transfer_encoding = List.Assoc.find headers "Transfer-Encoding" in
+    match (content_len, transfer_encoding) with
+    | (Some len, _) -> lift (fun body -> {Response.status; version; headers; body = make_resp_body body})
+                         (response_body (int_of_string len))
+    | (_, Some "chunked") -> lift (fun body -> {Response.status; version; headers; body = make_resp_body body})
+                               response_chunked
+    | _ -> return {Response.status; version; headers; body = make_resp_body ""}
 end
 
 type meth = Get | Post | Put | Delete | Head | Options | Patch
@@ -232,7 +255,7 @@ let make_request' bp meth =
 
 let format_bp bp =
   let open Blueprint in
-(  match bp.addr with
+  (  match bp.addr with
   | Ok v -> (sexp_of_addr v)
   | Error (AddrError (orig, err)) -> Sexp.(List [Atom "BadAddr"; Atom orig; Atom err])
   | Error e -> Sexp.(List [Atom "UnexpectedAddrError"]))

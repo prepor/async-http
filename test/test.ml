@@ -51,8 +51,6 @@ let%expect_test "parsed body" =
   [%expect {|
     test.native: [INFO] Make HTTP request (Inet (httpbin.org 80))
     test.native: [DEBUG] HTTP checkout conn for (Inet (httpbin.org 80))
-    test.native: [DEBUG] HTTP connection for (Inet (httpbin.org 80)) is not valid, forget about it
-    test.native: [DEBUG] HTTP create new conn for (Inet (httpbin.org 80))
     test.native: [DEBUG] HTTP Raw: GET /get HTTP/1.1
     test.native: [DEBUG] HTTP Raw: Host: httpbin.org
     test.native: [DEBUG] HTTP checkin conn for (Inet (httpbin.org 80))
@@ -78,6 +76,21 @@ let%expect_test "bad url" =
     test.native: [INFO] Make HTTP request (BadAddr lala://ya.ru/get "Unknown port for this uri")
     ("Async_http.AddrError(\"lala://ya.ru/get\", \"Unknown port for this uri\")") |}]
 
+let%expect_test "chunked encoding" =
+  request "https://httpbin.org/stream/1" |> get
+  >>| print_response >>= fun () ->
+  [%expect {|
+    test.native: [INFO] Make HTTP request (Inet (httpbin.org 443))
+    test.native: [DEBUG] HTTP checkout conn for (Inet (httpbin.org 443))
+    test.native: [DEBUG] HTTP create new conn for (Inet (httpbin.org 443))
+    test.native: [DEBUG] HTTP Raw: GET /stream/1 HTTP/1.1
+    test.native: [DEBUG] HTTP Raw: Host: httpbin.org
+    test.native: [DEBUG] HTTP checkin conn for (Inet (httpbin.org 443))
+    {"url": "https://httpbin.org/stream/1", "headers": {"Host": "httpbin.org"}, "args": {}, "id": 0, "origin": ".+"} (regexp) |}]
 
 let () =
   Ppx_inline_test_lib.Runtime.exit ()
+
+(* let _ = *)
+(*   request "https://httpbin.org/stream/1" |> get >>| print_json_response |> don't_wait_for; *)
+(*   Scheduler.go () *)
