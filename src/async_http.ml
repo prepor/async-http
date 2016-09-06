@@ -83,7 +83,7 @@ module Protocol = struct
   let header =
     let colon = char ':' <* spaces in
     lift2 (fun key value -> (key, value))
-      token
+      (token >>| String.lowercase)
       (colon *> take_till P.is_eol)
 
   let request =
@@ -123,8 +123,8 @@ module Protocol = struct
     let make_resp_body (body : string) : r = match typ with
     | Response.String -> body
     | Response.Parsed v -> v body in
-    let content_len = List.Assoc.find headers "Content-Length" in
-    let transfer_encoding = List.Assoc.find headers "Transfer-Encoding" in
+    let content_len = List.Assoc.find headers "content-length" in
+    let transfer_encoding = List.Assoc.find headers "transfer-encoding" in
     match (content_len, transfer_encoding) with
     | (Some len, _) -> lift (fun body -> {Response.status; version; headers; body = make_resp_body body})
                          (response_body (int_of_string len))

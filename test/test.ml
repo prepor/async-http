@@ -20,6 +20,11 @@ let print_response r =
   |> format_response
   |> print_endline
 
+let print_f_response r =
+  Result.ok_exn r
+  |> format_f_response
+  |> print_endline
+
 let print_json_response r =
   let ({Response.body} as r') = Result.ok_exn r in
   {r' with Response.body = Yojson.Basic.pretty_to_string body }
@@ -28,7 +33,7 @@ let print_json_response r =
 
 let%expect_test "basic get request" =
   request "http://httpbin.org/get" |> get
-  >>| print_response >>= fun () ->
+  >>| print_f_response >>= fun () ->
   [%expect {|
     test.native: [INFO] Make HTTP request (Inet (httpbin.org 80))
     test.native: [DEBUG] HTTP checkout conn for (Inet (httpbin.org 80))
@@ -36,6 +41,11 @@ let%expect_test "basic get request" =
     test.native: [DEBUG] HTTP Raw: GET /get HTTP/1.1
     test.native: [DEBUG] HTTP Raw: Host: httpbin.org
     test.native: [DEBUG] HTTP checkin conn for (Inet (httpbin.org 80))
+    Status: 200
+    Headers: ((server nginx) (date ".+") (regexp)
+     (content-type application/json) (content-length [0-9]+) (connection keep-alive) (regexp)
+     (access-control-allow-origin *) (access-control-allow-credentials true))
+    Body:
     {
       "args": {},
       "headers": {
