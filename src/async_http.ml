@@ -241,7 +241,10 @@ let handle_request bp meth fd =
 let persistent_request bp addr meth =
   let%bind fd = Pool.checkout pool addr in
   match%map try_with (fun () -> handle_request bp meth fd) with
-  | Ok res -> (Pool.checkin pool addr fd; res)
+  | Ok res ->
+      (match List.Assoc.find res.Response.headers "connection" with
+      | Some "close" -> (Fd.close fd |> don't_wait_for; res)
+      | _ -> (Pool.checkin pool addr fd; res))
   | Error exn -> (Fd.close fd |> don't_wait_for; raise exn)
 
 let one_shot_request bp addr meth =
@@ -266,12 +269,12 @@ let make_request meth bp =
   try_with (fun () -> make_request' bp meth)
     ~name:(sprintf "HTTP request: %s" (format_bp bp))
 
-let header ~name ~value bp =
+let header name value bp =
   let open Blueprint in
   { bp with headers = (name, value)::bp.headers }
 
 let headers pairs bp =
-  List.fold pairs ~init:bp ~f:(fun bp (name, value) -> header ~name ~value bp)
+  List.fold pairs ~init:bp ~f:(fun bp (name, value) -> header name value bp)
 
 let path p bp =
   { bp with Blueprint.path = p }
@@ -279,7 +282,7 @@ let path p bp =
 let body s bp =
   { bp with Blueprint.body = Some s }
 
-let query_param ~name ~value bp =
+let query_param name value bp =
   let open Blueprint in
   let vals = List.Assoc.find bp.query_params name |> function
     | Some v -> value::v
@@ -287,7 +290,7 @@ let query_param ~name ~value bp =
   { bp with query_params = List.Assoc.add bp.query_params name vals  }
 
 let query_params pairs bp =
-  List.fold pairs ~init:bp ~f:(fun bp (name, value) -> query_param ~name ~value bp)
+  List.fold pairs ~init:bp ~f:(fun bp (name, value) -> query_param name value bp)
 
 let ssl bp = { bp with Blueprint.is_ssl = true }
 
@@ -310,11 +313,11 @@ let request_of_uri uri =
   |> request_of_addr'
   |> path (Uri.path uri)
   |> (fun bp -> match addr with
-    | Ok (`Inet (host, _)) -> header bp ~name:"Host" ~value:host
+    | Ok (`Inet (host, _)) -> header "Host" host bp
     | Error _ -> bp)
   |> (fun bp -> if Some "https" = (Uri.scheme uri) then ssl bp else bp)
   |> fun bp -> List.fold (Uri.query uri) ~init:bp ~f:(fun bp (name, values) ->
-      List.fold values ~init:bp ~f:(fun bp value -> query_param ~name ~value bp) )
+      List.fold values ~init:bp ~f:(fun bp value -> query_param name value bp) )
 
 let request uri =
   Uri.of_string uri |> request_of_uri

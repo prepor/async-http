@@ -35,11 +35,11 @@ val path : string -> ('a, 'b) Blueprint.t -> ('a, 'b) Blueprint.t
 
 val parser : (string -> 'c) -> ('a, 'b) Blueprint.t -> ('a, 'c) Blueprint.t
 
-val query_param : name:string -> value:string -> ('a, 'b) Blueprint.t -> ('a, 'b) Blueprint.t
+val query_param : string -> string -> ('a, 'b) Blueprint.t -> ('a, 'b) Blueprint.t
 
 val query_params : (string * string) list -> ('a, 'b) Blueprint.t -> ('a, 'b) Blueprint.t
 
-val header : name:string -> value:string -> ('a, 'b) Blueprint.t -> ('a, 'b) Blueprint.t
+val header : string -> string -> ('a, 'b) Blueprint.t -> ('a, 'b) Blueprint.t
 
 val headers : (string * string) list -> ('a, 'b) Blueprint.t -> ('a, 'b) Blueprint.t
 
