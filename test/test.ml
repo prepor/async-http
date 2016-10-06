@@ -6,6 +6,7 @@ let () =
   let f = (Writer.to_formatter (Lazy.force Writer.stdout)) in
   Logs.set_reporter (Logs.format_reporter ~dst:f ~app:f ());
   Logs.Src.set_level Async_http_log.src (Some Logs.Debug)
+(* Logs.Src.set_level Async_http_log.Res.src (Some Logs.Debug) *)
 
 let format_f_response {Response.body; status; headers} =
   sprintf "Status: %i\nHeaders: %s\nBody:\n%s"

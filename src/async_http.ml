@@ -92,7 +92,11 @@ module Protocol = struct
       (many (header <* eol) <* eol)
 
   let response_header =
-    lift2 (fun (version, status, msg) headers -> (version, status, msg, headers))
+    lift2 (fun (version, status, msg) headers ->
+        L.Res.debug (fun m -> m "HTTP Raw Response: HTTP/%s %i %s" version status msg);
+        List.iter headers ~f:(fun (k, v) ->
+            L.Res.debug (fun m -> m "HTTP Raw Response: %s: %s" k v));
+        (version, status, msg, headers))
       (response_first_line  <* eol)
       (many (header <* eol) <* eol)
 
@@ -120,9 +124,11 @@ module Protocol = struct
 
   let response (type r) (typ : r Response.body) =
     response_header >>= fun (version, status, msg, headers) ->
-    let make_resp_body (body : string) : r = match typ with
-    | Response.String -> body
-    | Response.Parsed v -> v body in
+    let make_resp_body (body : string) : r =
+      L.Res.debug (fun m -> m "HTTP Raw Response: %s" body);
+      match typ with
+      | Response.String -> body
+      | Response.Parsed v -> v body in
     let content_len = List.Assoc.find headers "content-length" in
     let transfer_encoding = List.Assoc.find headers "transfer-encoding" in
     match (content_len, transfer_encoding) with
@@ -219,7 +225,9 @@ let handle_request bp meth fd =
   let raw = (meth_to_string meth) ^ " " ^ (Uri.path_and_query bp.uri) ^ " HTTP/1.1" in
   L.debug (fun m -> m "HTTP Raw: %s" raw);
   W.write w' (raw ^ "\r\n");
-  List.iter bp.headers ~f:(fun (k,v) ->
+  let headers = if (List.Assoc.mem bp.headers "Host") then bp.headers
+    else ("Host", "")::bp.headers in
+  List.iter headers ~f:(fun (k,v) ->
       let raw = k ^ ": " ^ v in
       L.debug (fun m -> m "HTTP Raw: %s" raw);
       W.write w' (raw ^ "\r\n"));
