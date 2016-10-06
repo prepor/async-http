@@ -147,9 +147,8 @@ let meth_to_string = function
 module Blueprint = struct
   type ('a, 'b) t = { addr : (addr, exn) Result.t;
                       is_ssl : bool;
-                      headers : (string, string) List.Assoc.t;
-                      path : string;
-                      query_params : (string, string list) List.Assoc.t;
+                      headers : (string * string) list;
+                      uri : Uri.t;
                       body: string option;
                       is_persistent: bool;
                       response_type: 'b Response.body}
@@ -189,7 +188,7 @@ let pool = Pool.create ()
 
 let request_of_addr' addr =
   {Blueprint.addr;
-   is_ssl = false; headers = []; path = "/"; query_params = []; body = None;
+   is_ssl = false; headers = []; uri = Uri.empty; body = None;
    is_persistent = true; response_type = Response.String}
 
 let request_of_addr addr =
@@ -217,7 +216,7 @@ let handle_request bp meth fd =
   | false -> return (r, w) in
   Writer.set_raise_when_consumer_leaves w true;
   let module W = Writer in
-  let raw = (meth_to_string meth) ^ " " ^ bp.path ^ " HTTP/1.1" in
+  let raw = (meth_to_string meth) ^ " " ^ (Uri.path_and_query bp.uri) ^ " HTTP/1.1" in
   L.debug (fun m -> m "HTTP Raw: %s" raw);
   W.write w' (raw ^ "\r\n");
   List.iter bp.headers ~f:(fun (k,v) ->
@@ -234,9 +233,9 @@ let handle_request bp meth fd =
       W.write w' "\r\n");
 
   W.flushed w' >>= fun () ->
-  let%map res = Angstrom_async.parse (Protocol.response bp.response_type) r' in
-  let res' = Result.map_error res ~f:(fun str -> ProtocolError str) in
-  Result.ok_exn res'
+  match%map Angstrom_async.parse (Protocol.response bp.response_type) r' with
+  | Ok v -> v
+  | Error v -> raise (ProtocolError v)
 
 let persistent_request bp addr meth =
   let%bind fd = Pool.checkout pool addr in
@@ -270,27 +269,22 @@ let make_request meth bp =
     ~name:(sprintf "HTTP request: %s" (format_bp bp))
 
 let header name value bp =
-  let open Blueprint in
-  { bp with headers = (name, value)::bp.headers }
+  Blueprint.{bp with headers = (name, value)::bp.headers}
 
 let headers pairs bp =
-  List.fold pairs ~init:bp ~f:(fun bp (name, value) -> header name value bp)
+  Blueprint.{bp with headers = pairs @ bp.headers}
 
 let path p bp =
-  { bp with Blueprint.path = p }
+  Blueprint.{ bp with uri = Uri.with_path bp.uri p }
 
 let body s bp =
   { bp with Blueprint.body = Some s }
 
 let query_param name value bp =
-  let open Blueprint in
-  let vals = List.Assoc.find bp.query_params name |> function
-    | Some v -> value::v
-    | None -> [value] in
-  { bp with query_params = List.Assoc.add bp.query_params name vals  }
+  Blueprint.{ bp with uri = Uri.add_query_param' bp.uri (name, value) }
 
 let query_params pairs bp =
-  List.fold pairs ~init:bp ~f:(fun bp (name, value) -> query_param name value bp)
+  Blueprint.{ bp with uri = Uri.add_query_params' bp.uri pairs }
 
 let ssl bp = { bp with Blueprint.is_ssl = true }
 

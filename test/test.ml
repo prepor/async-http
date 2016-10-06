@@ -32,13 +32,17 @@ let print_json_response r =
   |> print_endline
 
 let%expect_test "basic get request" =
-  request "http://httpbin.org/get" |> get
+  request "http://httpbin.org/get"
+  |> header "X-Test-Header" "some-value"
+  |> query_param "some-param" "other&&value"
+  |> get
   >>| print_f_response >>= fun () ->
   [%expect {|
     test.native: [INFO] Make HTTP request (Inet (httpbin.org 80))
     test.native: [DEBUG] HTTP checkout conn for (Inet (httpbin.org 80))
     test.native: [DEBUG] HTTP create new conn for (Inet (httpbin.org 80))
-    test.native: [DEBUG] HTTP Raw: GET /get HTTP/1.1
+    test.native: [DEBUG] HTTP Raw: GET /get?some-param=other%26%26value HTTP/1.1
+    test.native: [DEBUG] HTTP Raw: X-Test-Header: some-value
     test.native: [DEBUG] HTTP Raw: Host: httpbin.org
     test.native: [DEBUG] HTTP checkin conn for (Inet (httpbin.org 80))
     Status: 200
@@ -47,12 +51,15 @@ let%expect_test "basic get request" =
      (access-control-allow-origin *) (access-control-allow-credentials true))
     Body:
     {
-      "args": {},
+      "args": {
+        "some-param": "other&&value"
+      },
       "headers": {
-        "Host": "httpbin.org"
+        "Host": "httpbin.org",
+        "X-Test-Header": "some-value"
       },
       "origin": ".+", (regexp)
-      "url": "http://httpbin.org/get"
+      "url": "http://httpbin.org/get?some-param=other%26%26value"
     } |}]
 
 let%expect_test "parsed body" =
