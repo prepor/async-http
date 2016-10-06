@@ -9,6 +9,10 @@ bug-reports: "https://github.com/prepor/async-http/issues"
 tags: []
 available: [ ocaml-version >= "4.01.0"]
 depends: [
+  "async"
+  "async_ssl"
+  "uri"
+  "angstrom"
   "ocamlfind" {build}
   "ocamlbuild" {build}
   "topkg" {build} ]

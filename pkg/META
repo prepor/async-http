@@ -1,6 +1,6 @@
 description = "Simple HTTP client and server for async"
 version = "%%VERSION_NUM%%"
-requires = ""
+requires = "async async_ssl uri angstrom angstrom.async"
 archive(byte) = "async_http.cma"
 archive(native) = "async_http.cmxa"
 plugin(byte) = "async_http.cma"
