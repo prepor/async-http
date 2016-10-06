@@ -236,7 +236,8 @@ let handle_request bp meth fd =
       let raw = "Content-Length: " ^ Int.to_string (String.length s) in
       L.debug (fun m -> m "HTTP Raw: %s" raw);
       W.write w' (raw ^ "\r\n");
-      W.write w' "\r\n"
+      W.write w' "\r\n";
+      W.write w' (s ^ "\r\n");
   | None ->
       W.write w' "\r\n");
 

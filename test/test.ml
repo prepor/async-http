@@ -63,6 +63,38 @@ let%expect_test "basic get request" =
       "url": "http://httpbin.org/get?some-param=other%26%26value"
     } |}]
 
+let%expect_test "basic post request" =
+  request "http://httpbin.org/post"
+  |> body "hello world"
+  |> post
+  >>| print_f_response >>= fun () ->
+  [%expect {|
+    test.native: [INFO] Make HTTP request (Inet (httpbin.org 80))
+    test.native: [DEBUG] HTTP checkout conn for (Inet (httpbin.org 80))
+    test.native: [DEBUG] HTTP Raw: POST /post HTTP/1.1
+    test.native: [DEBUG] HTTP Raw: Host: httpbin.org
+    test.native: [DEBUG] HTTP Raw: Content-Length: 11
+    test.native: [DEBUG] HTTP checkin conn for (Inet (httpbin.org 80))
+    Status: 200
+    Headers: ((server nginx) (date ".+") (regexp)
+     (content-type application/json) (content-length [0-9]+) (connection keep-alive) (regexp)
+     (access-control-allow-origin *) (access-control-allow-credentials true))
+    Body:
+    {
+      "args": {},
+      "data": "hello world",
+      "files": {},
+      "form": {},
+      "headers": {
+        "Content-Length": "11",
+        "Host": "httpbin.org"
+      },
+      "json": null,
+      "origin": ".+", (regexp)
+      "url": "http://httpbin.org/post"
+    } |}]
+
+
 let%expect_test "parsed body" =
   request "http://httpbin.org/get" |> parser Yojson.Basic.from_string |> get
   >>| print_json_response >>= fun () ->
