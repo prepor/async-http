@@ -237,7 +237,7 @@ let handle_request bp meth fd =
       L.debug (fun m -> m "HTTP Raw: %s" raw);
       W.write w' (raw ^ "\r\n");
       W.write w' "\r\n";
-      W.write w' (s ^ "\r\n");
+      W.write w' s;
   | None ->
       W.write w' "\r\n");
 
