@@ -13,6 +13,7 @@ depends: [
   "async_ssl"
   "uri"
   "angstrom"
+  "logs"
   "ocamlfind" {build}
   "ocamlbuild" {build}
   "topkg" {build} ]
