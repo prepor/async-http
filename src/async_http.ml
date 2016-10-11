@@ -83,7 +83,7 @@ module Protocol = struct
   let header =
     let colon = char ':' <* spaces in
     lift2 (fun key value -> (key, value))
-      (token >>| String.lowercase)
+      token
       (colon *> take_till P.is_eol)
 
   let request =
@@ -129,8 +129,8 @@ module Protocol = struct
       match typ with
       | Response.String -> body
       | Response.Parsed v -> v body in
-    let content_len = List.Assoc.find headers "content-length" in
-    let transfer_encoding = List.Assoc.find headers "transfer-encoding" in
+    let content_len = List.Assoc.find headers ~equal:String.Caseless.equal "Content-Length" in
+    let transfer_encoding = List.Assoc.find headers ~equal:String.Caseless.equal "Transfer-Encoding" in
     match (content_len, transfer_encoding) with
     | (Some len, _) -> lift (fun body -> {Response.status; version; headers; body = make_resp_body body})
                          (response_body (int_of_string len))
@@ -250,7 +250,7 @@ let persistent_request bp addr meth =
   let%bind fd = Pool.checkout pool addr in
   match%map try_with (fun () -> handle_request bp meth fd) with
   | Ok res ->
-      (match List.Assoc.find res.Response.headers "connection" with
+      (match List.Assoc.find res.Response.headers ~equal:String.Caseless.equal "Connection" with
       | Some "close" -> (Fd.close fd |> don't_wait_for; res)
       | _ -> (Pool.checkin pool addr fd; res))
   | Error exn -> (Fd.close fd |> don't_wait_for; raise exn)

@@ -47,9 +47,9 @@ let%expect_test "basic get request" =
     test.native: [DEBUG] HTTP Raw: Host: httpbin.org
     test.native: [DEBUG] HTTP checkin conn for (Inet (httpbin.org 80))
     Status: 200
-    Headers: ((server nginx) (date ".+") (regexp)
-     (content-type application/json) (content-length [0-9]+) (connection keep-alive) (regexp)
-     (access-control-allow-origin *) (access-control-allow-credentials true))
+    Headers: ((Server nginx) (Date ".+") (regexp)
+     (Content-Type application/json) (Content-Length [0-9]+) (Connection keep-alive) (regexp)
+     (Access-Control-Allow-Origin *) (Access-Control-Allow-Credentials true))
     Body:
     {
       "args": {
@@ -76,9 +76,9 @@ let%expect_test "basic post request" =
     test.native: [DEBUG] HTTP Raw: Content-Length: 11
     test.native: [DEBUG] HTTP checkin conn for (Inet (httpbin.org 80))
     Status: 200
-    Headers: ((server nginx) (date ".+") (regexp)
-     (content-type application/json) (content-length [0-9]+) (connection keep-alive) (regexp)
-     (access-control-allow-origin *) (access-control-allow-credentials true))
+    Headers: ((Server nginx) (Date ".+") (regexp)
+     (Content-Type application/json) (Content-Length [0-9]+) (Connection keep-alive) (regexp)
+     (Access-Control-Allow-Origin *) (Access-Control-Allow-Credentials true))
     Body:
     {
       "args": {},
