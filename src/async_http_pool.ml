@@ -67,7 +67,9 @@ module Make (Obj : Obj) = struct
       match Linked_queue.peek q with
       | Some {updated_at; obj} ->
           if (Time.is_later (Time.add updated_at pool.expiration_time) ~than: n)
-          then (Linked_queue.dequeue q |> ignore; w ())
+          then (Linked_queue.dequeue q |> ignore;
+                Obj.destroy obj;
+                w ())
           else ()
       | None -> () in
     w ()

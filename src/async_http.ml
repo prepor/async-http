@@ -256,8 +256,10 @@ let persistent_request bp addr meth =
   | Error exn -> (Fd.close fd |> don't_wait_for; raise exn)
 
 let one_shot_request bp addr meth =
-  make_socket addr >>=
-  handle_request bp meth
+  let%bind fd = make_socket addr in
+  let%bind res = handle_request bp meth fd in
+  let%map () = Fd.close fd in
+  res
 
 let make_request' bp meth =
   let addr = Result.ok_exn bp.Blueprint.addr in
