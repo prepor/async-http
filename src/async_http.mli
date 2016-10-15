@@ -8,6 +8,7 @@ open! Core.Std
 open! Async.Std
 
 exception ProtocolError of string
+exception FailedRequest of string
 exception AddrError of string * string
 
 module Response : sig
@@ -34,6 +35,8 @@ val request : string -> ([< `Without_body], string) Blueprint.t
 val path : string -> ('a, 'b) Blueprint.t -> ('a, 'b) Blueprint.t
 
 val parser : (string -> 'c) -> ('a, 'b) Blueprint.t -> ('a, 'c) Blueprint.t
+
+val success_if : [`Always | `List of int list | `Range of (int * int) | `Code_2xx] -> ('a, 'b) Blueprint.t -> ('a, 'b) Blueprint.t
 
 val query_param : string -> string -> ('a, 'b) Blueprint.t -> ('a, 'b) Blueprint.t
 

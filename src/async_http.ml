@@ -16,6 +16,7 @@ end
 type addr = [`Unix of string | `Inet of (string * int)] [@@deriving sexp]
 
 exception ProtocolError of string
+exception FailedRequest of string
 exception AddrError of string * string
 
 module Protocol = struct
@@ -122,21 +123,32 @@ module Protocol = struct
   let response_chunked =
     many chunk <* trailer <* eol >>| String.concat
 
-  let response (type r) (typ : r Response.body) =
+  let is_success success_if status =
+    match success_if with
+    | `Always -> true
+    | `List codes -> List.mem codes status
+    | `Range (from, to_) -> from <= status && status < to_
+    | `Code_2xx -> 200 <= status && status < 300
+
+  let response (type r) success_if (typ : r Response.body) =
     response_header >>= fun (version, status, msg, headers) ->
     let make_resp_body (body : string) : r =
       L.Res.debug (fun m -> m "HTTP Raw Response: %s" body);
       match typ with
-      | Response.String -> body
-      | Response.Parsed v -> v body in
+      | Response.String-> body
+      | Response.Parsed v -> (v body) in
     let content_len = List.Assoc.find headers ~equal:String.Caseless.equal "Content-Length" in
     let transfer_encoding = List.Assoc.find headers ~equal:String.Caseless.equal "Transfer-Encoding" in
-    match (content_len, transfer_encoding) with
-    | (Some len, _) -> lift (fun body -> {Response.status; version; headers; body = make_resp_body body})
-                         (response_body (int_of_string len))
-    | (_, Some "chunked") -> lift (fun body -> {Response.status; version; headers; body = make_resp_body body})
-                               response_chunked
-    | _ -> return {Response.status; version; headers; body = make_resp_body ""}
+    let body_parser = match (content_len, transfer_encoding) with
+    | (Some len, _) -> (response_body (int_of_string len))
+    | (_, Some "chunked") -> response_chunked
+    | _ -> string "" in
+    lift (fun body ->
+        if (is_success success_if status) then
+          Ok {Response.status; version; headers; body = make_resp_body body}
+        else Error (status, body))
+      body_parser
+
 end
 
 type meth = Get | Post | Put | Delete | Head | Options | Patch
@@ -155,54 +167,12 @@ module Blueprint = struct
                       is_ssl : bool;
                       headers : (string * string) list;
                       uri : Uri.t;
-                      body: string option;
-                      is_persistent: bool;
-                      response_type: 'b Response.body}
+                      body : string option;
+                      is_persistent : bool;
+                      response_type : 'b Response.body;
+                      success_if : [`Always | `List of int list | `Range of (int * int) | `Code_2xx]}
     constraint 'a = [< `With_body | `Without_body ]
 end
-
-let make_socket addr =
-  match addr with
-  | `Inet (host, port) ->
-      let%bind addr' = Unix.Inet_addr.of_string_or_getbyname host in
-      let%map s = Socket.connect (Socket.create Socket.Type.tcp) (`Inet (addr', port)) in
-      Socket.fd s
-  | `Unix addr ->
-      let%map s = Socket.connect (Socket.create Socket.Type.unix) (`Unix addr) in
-      Socket.fd s
-
-module PoolConn = struct
-  module P = struct
-    type t = addr
-    let t_of_sexp = addr_of_sexp
-    let sexp_of_t = sexp_of_addr
-    let compare = compare
-    let hash = Hashtbl.hash
-  end
-
-  type p = addr
-  type t = Fd.t
-
-  let create = make_socket
-  let is_valid = Fn.non Fd.is_closed
-  let destroy fd = Fd.close fd |> don't_wait_for
-end
-
-module Pool = Async_http_pool.Make(PoolConn)
-
-let pool = Pool.create ()
-
-let request_of_addr' addr =
-  let host_header = match addr with
-  | Ok `Inet (host, 80) | Ok `Inet (host, 443) -> host
-  | Ok `Inet (host, port) -> (sprintf "%s:%i" host port)
-  | _ -> "" in
-  {Blueprint.addr;
-   is_ssl = false; headers = [("Host", host_header)]; uri = Uri.empty; body = None;
-   is_persistent = true; response_type = Response.String}
-
-let request_of_addr addr =
-  request_of_addr' (Ok addr)
 
 let ssl_connect net_to_ssl ssl_to_net =
   let open Async_ssl.Std in
@@ -217,56 +187,106 @@ let ssl_connect net_to_ssl ssl_to_net =
   Writer.of_pipe (Info.of_string "async_ssl_writer") app_wr >>| fun (app_wr,_) ->
   (app_rd, app_wr)
 
-let handle_request bp meth fd =
-  let open Blueprint in
+type connection_spec = (addr * bool) [@@deriving sexp]
+
+let make_socket (addr, is_ssl) =
+  let%bind fd = match addr with
+  | `Inet (host, port) ->
+      let%bind addr' = Unix.Inet_addr.of_string_or_getbyname host in
+      let%map s = Socket.connect (Socket.create Socket.Type.tcp) (`Inet (addr', port)) in
+      Socket.fd s
+  | `Unix addr ->
+      let%map s = Socket.connect (Socket.create Socket.Type.unix) (`Unix addr) in
+      Socket.fd s in
   let w = Writer.create fd in
   let r = (Reader.create fd) in
-  let%bind (r', w') = match bp.is_ssl with
+  let%map (r', w') = match is_ssl with
   | true -> ssl_connect r w
   | false -> return (r, w) in
+  (r', w', fd)
+
+
+module PoolConn = struct
+  module P = struct
+    type t = connection_spec
+    let t_of_sexp = connection_spec_of_sexp
+    let sexp_of_t = sexp_of_connection_spec
+    let compare = compare
+    let hash = Hashtbl.hash
+  end
+
+  type p = P.t
+  type t = (Reader.t * Writer.t * Fd.t)
+
+  let create = make_socket
+  let is_valid (_, _, fd) = not @@ Fd.is_closed fd
+  let destroy (_, _, fd) = Fd.close fd |> don't_wait_for
+end
+
+module Pool = Async_http_pool.Make(PoolConn)
+
+let pool = Pool.create ()
+
+let request_of_addr' addr =
+  let host_header = match addr with
+  | Ok `Inet (host, 80) | Ok `Inet (host, 443) -> host
+  | Ok `Inet (host, port) -> (sprintf "%s:%i" host port)
+  | _ -> "" in
+  {Blueprint.addr;
+   is_ssl = false; headers = [("Host", host_header)]; uri = Uri.empty; body = None;
+   is_persistent = true; response_type = Response.String;
+   success_if = `Code_2xx}
+
+let request_of_addr addr =
+  request_of_addr' (Ok addr)
+
+let handle_request bp meth (r,w) =
+  let open Blueprint in
   Writer.set_raise_when_consumer_leaves w true;
   let module W = Writer in
   let raw = (meth_to_string meth) ^ " " ^ (Uri.path_and_query bp.uri) ^ " HTTP/1.1" in
   L.debug (fun m -> m "HTTP Raw: %s" raw);
-  W.write w' (raw ^ "\r\n");
+  W.write w (raw ^ "\r\n");
   List.iter bp.headers ~f:(fun (k,v) ->
       let raw = k ^ ": " ^ v in
       L.debug (fun m -> m "HTTP Raw: %s" raw);
-      W.write w' (raw ^ "\r\n"));
+      W.write w (raw ^ "\r\n"));
   (match bp.body with
   | Some s ->
       let raw = "Content-Length: " ^ Int.to_string (String.length s) in
       L.debug (fun m -> m "HTTP Raw: %s" raw);
-      W.write w' (raw ^ "\r\n");
-      W.write w' "\r\n";
-      W.write w' s;
+      W.write w (raw ^ "\r\n");
+      W.write w "\r\n";
+      W.write w s;
   | None ->
-      W.write w' "\r\n");
+      W.write w "\r\n");
 
-  W.flushed w' >>= fun () ->
-  match%map Angstrom_async.parse (Protocol.response bp.response_type) r' with
-  | Ok v -> v
+  W.flushed w >>= fun () ->
+  match%map Angstrom_async.parse (Protocol.response bp.success_if bp.response_type) r with
+  | Ok Ok v -> v
+  | Ok Error (status, v) -> raise (FailedRequest (sprintf "status %i, response: %s" status v))
   | Error v -> raise (ProtocolError v)
 
-let persistent_request bp addr meth =
-  let%bind fd = Pool.checkout pool addr in
-  match%map try_with (fun () -> handle_request bp meth fd) with
+let persistent_request bp connection_spec meth =
+  let%bind (r, w, fd) as obj = Pool.checkout pool connection_spec in
+  match%map try_with ~extract_exn:true (fun () -> handle_request bp meth (r,w)) with
   | Ok res ->
       (match List.Assoc.find res.Response.headers ~equal:String.Caseless.equal "Connection" with
       | Some "close" -> (Fd.close fd |> don't_wait_for; res)
-      | _ -> (Pool.checkin pool addr fd; res))
+      | _ -> (Pool.checkin pool connection_spec obj; res))
   | Error exn -> (Fd.close fd |> don't_wait_for; raise exn)
 
 let one_shot_request bp addr meth =
-  let%bind fd = make_socket addr in
-  let%bind res = handle_request bp meth fd in
+  let%bind (r,w,fd) = make_socket addr in
+  let%bind res = handle_request bp meth (r,w) in
   let%map () = Fd.close fd in
   res
 
 let make_request' bp meth =
-  let addr = Result.ok_exn bp.Blueprint.addr in
-  if bp.Blueprint.is_persistent then persistent_request bp addr meth
-  else one_shot_request bp addr meth
+  let open Blueprint in
+  let addr = Result.ok_exn bp.addr in
+  if bp.is_persistent then persistent_request bp (addr, bp.is_ssl) meth
+  else one_shot_request bp (addr, bp.is_ssl) meth
 
 let format_bp bp =
   let open Blueprint in
@@ -278,7 +298,7 @@ let format_bp bp =
 
 let make_request meth bp =
   L.info (fun m -> m "Make HTTP request %s" (format_bp bp));
-  try_with (fun () -> make_request' bp meth)
+  try_with ~extract_exn:true (fun () -> make_request' bp meth)
     ~name:(sprintf "HTTP request: %s" (format_bp bp))
 
 let header name value bp =
@@ -304,6 +324,8 @@ let ssl bp = { bp with Blueprint.is_ssl = true }
 let not_persistent bp = { bp with Blueprint.is_persistent = false }
 
 let parser p bp = { bp with Blueprint.response_type = Response.Parsed p }
+
+let success_if v bp = { bp with Blueprint.success_if = v }
 
 let request_of_uri uri =
   let addr = let open Result.Let_syntax in

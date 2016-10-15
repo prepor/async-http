@@ -40,12 +40,12 @@ let%expect_test "basic get request" =
   >>| print_f_response >>= fun () ->
   [%expect {|
     test.native: [INFO] Make HTTP request (Inet (httpbin.org 80))
-    test.native: [DEBUG] HTTP checkout conn for (Inet (httpbin.org 80))
-    test.native: [DEBUG] HTTP create new conn for (Inet (httpbin.org 80))
+    test.native: [DEBUG] HTTP checkout conn for ((Inet (httpbin.org 80)) false)
+    test.native: [DEBUG] HTTP create new conn for ((Inet (httpbin.org 80)) false)
     test.native: [DEBUG] HTTP Raw: GET /get?some-param=other%26%26value HTTP/1.1
     test.native: [DEBUG] HTTP Raw: X-Test-Header: some-value
     test.native: [DEBUG] HTTP Raw: Host: httpbin.org
-    test.native: [DEBUG] HTTP checkin conn for (Inet (httpbin.org 80))
+    test.native: [DEBUG] HTTP checkin conn for ((Inet (httpbin.org 80)) false)
     Status: 200
     Headers: ((Server nginx) (Date ".+") (regexp)
      (Content-Type application/json) (Content-Length [0-9]+) (Connection keep-alive) (regexp)
@@ -70,11 +70,11 @@ let%expect_test "basic post request" =
   >>| print_f_response >>= fun () ->
   [%expect {|
     test.native: [INFO] Make HTTP request (Inet (httpbin.org 80))
-    test.native: [DEBUG] HTTP checkout conn for (Inet (httpbin.org 80))
+    test.native: [DEBUG] HTTP checkout conn for ((Inet (httpbin.org 80)) false)
     test.native: [DEBUG] HTTP Raw: POST /post HTTP/1.1
     test.native: [DEBUG] HTTP Raw: Host: httpbin.org
     test.native: [DEBUG] HTTP Raw: Content-Length: 11
-    test.native: [DEBUG] HTTP checkin conn for (Inet (httpbin.org 80))
+    test.native: [DEBUG] HTTP checkin conn for ((Inet (httpbin.org 80)) false)
     Status: 200
     Headers: ((Server nginx) (Date ".+") (regexp)
      (Content-Type application/json) (Content-Length [0-9]+) (Connection keep-alive) (regexp)
@@ -100,10 +100,10 @@ let%expect_test "parsed body" =
   >>| print_json_response >>= fun () ->
   [%expect {|
     test.native: [INFO] Make HTTP request (Inet (httpbin.org 80))
-    test.native: [DEBUG] HTTP checkout conn for (Inet (httpbin.org 80))
+    test.native: [DEBUG] HTTP checkout conn for ((Inet (httpbin.org 80)) false)
     test.native: [DEBUG] HTTP Raw: GET /get HTTP/1.1
     test.native: [DEBUG] HTTP Raw: Host: httpbin.org
-    test.native: [DEBUG] HTTP checkin conn for (Inet (httpbin.org 80))
+    test.native: [DEBUG] HTTP checkin conn for ((Inet (httpbin.org 80)) false)
     {
       "args": {},
       "headers": { "Host": "httpbin.org" },
@@ -126,17 +126,68 @@ let%expect_test "bad url" =
     test.native: [INFO] Make HTTP request (BadAddr lala://ya.ru/get "Unknown port for this uri")
     ("Async_http.AddrError(\"lala://ya.ru/get\", \"Unknown port for this uri\")") |}]
 
+let%expect_test "persistent connection with ssl" =
+  request "https://httpbin.org/get" |> parser Yojson.Basic.from_string |> get
+  >>| print_json_response >>= fun () ->
+  request "https://httpbin.org/get" |> parser Yojson.Basic.from_string |> get
+  >>| print_json_response >>= fun () ->
+  [%expect {|
+    test.native: [INFO] Make HTTP request (Inet (httpbin.org 443))
+    test.native: [DEBUG] HTTP checkout conn for ((Inet (httpbin.org 443)) true)
+    test.native: [DEBUG] HTTP create new conn for ((Inet (httpbin.org 443)) true)
+    test.native: [DEBUG] HTTP Raw: GET /get HTTP/1.1
+    test.native: [DEBUG] HTTP Raw: Host: httpbin.org
+    test.native: [DEBUG] HTTP checkin conn for ((Inet (httpbin.org 443)) true)
+    {
+      "args": {},
+      "headers": { "Host": "httpbin.org" },
+      "origin": "87.249.45.135",
+      "url": "https://httpbin.org/get"
+    }
+    test.native: [INFO] Make HTTP request (Inet (httpbin.org 443))
+    test.native: [DEBUG] HTTP checkout conn for ((Inet (httpbin.org 443)) true)
+    test.native: [DEBUG] HTTP Raw: GET /get HTTP/1.1
+    test.native: [DEBUG] HTTP Raw: Host: httpbin.org
+    test.native: [DEBUG] HTTP checkin conn for ((Inet (httpbin.org 443)) true)
+    {
+      "args": {},
+      "headers": { "Host": "httpbin.org" },
+      "origin": "87.249.45.135",
+      "url": "https://httpbin.org/get"
+    } |}]
+
+
 let%expect_test "chunked encoding" =
   request "https://httpbin.org/stream/1" |> get
   >>| print_response >>= fun () ->
   [%expect {|
     test.native: [INFO] Make HTTP request (Inet (httpbin.org 443))
-    test.native: [DEBUG] HTTP checkout conn for (Inet (httpbin.org 443))
-    test.native: [DEBUG] HTTP create new conn for (Inet (httpbin.org 443))
+    test.native: [DEBUG] HTTP checkout conn for ((Inet (httpbin.org 443)) true)
     test.native: [DEBUG] HTTP Raw: GET /stream/1 HTTP/1.1
     test.native: [DEBUG] HTTP Raw: Host: httpbin.org
-    test.native: [DEBUG] HTTP checkin conn for (Inet (httpbin.org 443))
+    test.native: [DEBUG] HTTP checkin conn for ((Inet (httpbin.org 443)) true)
     {"url": "https://httpbin.org/stream/1", "headers": {"Host": "httpbin.org"}, "args": {}, "id": 0, "origin": ".+"} (regexp) |}]
+
+let%expect_test "error response" =
+  request "https://httpbin.org/status/400" |> parser (fun s -> Yojson.Basic.from_string s; "ok") |> get
+  >>| print_error >>= fun () ->
+  request "https://httpbin.org/status/400"
+  |> parser (fun s -> Yojson.Basic.from_string s; "ok")
+  |> success_if `Always
+  |> get
+  >>| print_error >>= fun () ->
+  [%expect {|
+    test.native: [INFO] Make HTTP request (Inet (httpbin.org 443))
+    test.native: [DEBUG] HTTP checkout conn for ((Inet (httpbin.org 443)) true)
+    test.native: [DEBUG] HTTP Raw: GET /status/400 HTTP/1.1
+    test.native: [DEBUG] HTTP Raw: Host: httpbin.org
+    ("Async_http.FailedRequest(\"status 400, response: \")")
+    test.native: [INFO] Make HTTP request (Inet (httpbin.org 443))
+    test.native: [DEBUG] HTTP checkout conn for ((Inet (httpbin.org 443)) true)
+    test.native: [DEBUG] HTTP create new conn for ((Inet (httpbin.org 443)) true)
+    test.native: [DEBUG] HTTP Raw: GET /status/400 HTTP/1.1
+    test.native: [DEBUG] HTTP Raw: Host: httpbin.org
+    ("Yojson.Json_error(\"Blank input data\")") |}]
 
 let () =
   Ppx_inline_test_lib.Runtime.exit ()
