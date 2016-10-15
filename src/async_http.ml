@@ -193,8 +193,12 @@ module Pool = Async_http_pool.Make(PoolConn)
 let pool = Pool.create ()
 
 let request_of_addr' addr =
+  let host_header = match addr with
+  | Ok `Inet (host, 80) | Ok `Inet (host, 443) -> host
+  | Ok `Inet (host, port) -> (sprintf "%s:%i" host port)
+  | _ -> "" in
   {Blueprint.addr;
-   is_ssl = false; headers = []; uri = Uri.empty; body = None;
+   is_ssl = false; headers = [("Host", host_header)]; uri = Uri.empty; body = None;
    is_persistent = true; response_type = Response.String}
 
 let request_of_addr addr =
@@ -225,9 +229,7 @@ let handle_request bp meth fd =
   let raw = (meth_to_string meth) ^ " " ^ (Uri.path_and_query bp.uri) ^ " HTTP/1.1" in
   L.debug (fun m -> m "HTTP Raw: %s" raw);
   W.write w' (raw ^ "\r\n");
-  let headers = if (List.Assoc.mem bp.headers "Host") then bp.headers
-    else ("Host", "")::bp.headers in
-  List.iter headers ~f:(fun (k,v) ->
+  List.iter bp.headers ~f:(fun (k,v) ->
       let raw = k ^ ": " ^ v in
       L.debug (fun m -> m "HTTP Raw: %s" raw);
       W.write w' (raw ^ "\r\n"));
@@ -317,9 +319,6 @@ let request_of_uri uri =
   |> Result.map_error ~f:(fun e -> AddrError (Uri.to_string uri, e))
   |> request_of_addr'
   |> path (Uri.path uri)
-  |> (fun bp -> match addr with
-    | Ok (`Inet (host, _)) -> header "Host" host bp
-    | Error _ -> bp)
   |> (fun bp -> if Some "https" = (Uri.scheme uri) then ssl bp else bp)
   |> fun bp -> List.fold (Uri.query uri) ~init:bp ~f:(fun bp (name, values) ->
       List.fold values ~init:bp ~f:(fun bp value -> query_param name value bp) )
